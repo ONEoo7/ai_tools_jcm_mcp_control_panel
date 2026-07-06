@@ -35,16 +35,13 @@ export default async function DashboardPage() {
         />
         <EmptyState
           title="jcodemunch-mcp is not detected on this machine"
-          description={
-            env.errors[0] ??
-            "Install the CLI, or set the JCM_BIN environment variable to its full path, then reload."
-          }
+          description="No Python? No problem. The guided install can set up uv (a standalone binary) and use it to install jcodemunch-mcp — then register it with Claude Code."
           action={
             <Link
               href="/deploy"
               className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:opacity-90"
             >
-              Go to guided deploy →
+              Install jcodemunch-mcp →
             </Link>
           }
         />

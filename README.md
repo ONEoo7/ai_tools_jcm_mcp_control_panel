@@ -16,8 +16,11 @@ remembering CLI subcommands.
   per-project config. Comment-preserving, JSONC-validated, backup-on-write.
 - **Hooks** — see registered clients, policies, skills, and auto-reindex hooks;
   install/refresh or uninstall (with a dry-run default).
-- **Deploy** — guided setup for a new machine: register MCP clients, install the
-  CLAUDE.md policy, add reindex hooks. Streamed output, **dry-run by default**.
+- **Deploy** — two steps for a new machine. **Step 1 (Python-free install):**
+  installs [uv](https://astral.sh/uv) (a standalone binary) if missing and runs
+  `uv tool install jcodemunch-mcp` — no system Python required. **Step 2:** register
+  MCP clients, install the CLAUDE.md policy, add reindex hooks. Streamed output,
+  **dry-run by default**.
 - **XLSX report** — export a usage & savings workbook (Summary, Per-Tool,
   Indexed Repos).
 - **Help** — the jcodemunch tool guide, recent releases, and a config-key reference.
@@ -38,6 +41,7 @@ Key data sources:
 | Repos/index   | `jcodemunch-mcp list-repos --json`, `index`      |
 | Config        | `~/.code-index/config.jsonc`, `jcodemunch-mcp config` |
 | Hooks/clients | `jcodemunch-mcp install-status --json`           |
+| Bootstrap     | uv standalone installer, `uv tool install jcodemunch-mcp` |
 | Deploy        | `jcodemunch-mcp init` (with `--dry-run`)         |
 | Help          | `jcodemunch-mcp claude-md --generate`, `whatsnew`|
 

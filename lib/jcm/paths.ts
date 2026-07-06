@@ -14,6 +14,23 @@ import path from "node:path";
 
 export const home = os.homedir();
 
+/** Where uv (and uv tool shims) install binaries by default: ~/.local/bin. */
+export const localBinDir = path.join(home, ".local", "bin");
+
+export function exeName(base: string): string {
+  return process.platform === "win32" ? `${base}.exe` : base;
+}
+
+/** Expected uv path after the standalone installer runs (~/.local/bin/uv[.exe]). */
+export function expectedUvPath(): string {
+  return path.join(localBinDir, exeName("uv"));
+}
+
+/** Expected jcodemunch-mcp path after `uv tool install` (~/.local/bin/…). */
+export function expectedJcmPath(): string {
+  return path.join(localBinDir, exeName("jcodemunch-mcp"));
+}
+
 export const codeIndexDir = path.join(home, ".code-index");
 export const globalConfigFile = path.join(codeIndexDir, "config.jsonc");
 export const sessionLiveFile = path.join(codeIndexDir, "_session_live.json");

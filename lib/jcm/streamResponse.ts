@@ -40,7 +40,12 @@ export interface PlanStep {
  */
 export function streamedPlan(
   steps: PlanStep[],
-  opts: { cwd?: string; preface?: StreamEvent[] } = {},
+  opts: {
+    cwd?: string;
+    preface?: StreamEvent[];
+    dryRun?: boolean;
+    afterAll?: () => void;
+  } = {},
 ): Response {
   const encoder = new TextEncoder();
   const jcmName = (resolveBinary() ?? "jcodemunch-mcp").replace(/.*[\\/]/, "");
@@ -50,17 +55,23 @@ export function streamedPlan(
         controller.enqueue(encoder.encode(JSON.stringify(e) + "\n"));
       for (const p of opts.preface ?? []) emit(p);
 
+      let failed = false;
       for (let i = 0; i < steps.length; i++) {
         const step = steps[i];
         emit({
           type: "info",
           data: `▸ Step ${i + 1}/${steps.length}: ${step.label} — ${step.command} ${step.args.join(" ")}`,
         });
+        if (opts.dryRun) {
+          emit({ type: "stdout", data: "[dry run] command not executed" });
+          continue;
+        }
         const isJcm = step.command === "jcodemunch-mcp" || step.command === jcmName;
         const code = isJcm
           ? await stream(step.args, emit, { cwd: opts.cwd })
           : await streamExec(step.command, step.args, emit, { cwd: opts.cwd });
         if (code !== 0) {
+          failed = true;
           emit({
             type: "error",
             data: `Step ${i + 1} failed (exit ${code}). Stopping.`,
@@ -68,6 +79,12 @@ export function streamedPlan(
           break;
         }
       }
+      if (!opts.dryRun && !failed) opts.afterAll?.();
+      emit({
+        type: "exit",
+        data: failed ? "failed" : opts.dryRun ? "dry run complete" : "done",
+        code: failed ? 1 : 0,
+      });
       controller.close();
     },
   });

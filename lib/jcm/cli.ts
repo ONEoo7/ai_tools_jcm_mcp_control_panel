@@ -1,4 +1,8 @@
 import { spawn, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { localBinDir } from "./paths";
 
 /** Name of the CLI binary; overridable via env for non-standard installs. */
 export const BIN_NAME = process.env.JCM_BIN || "jcodemunch-mcp";
@@ -22,6 +26,21 @@ function whereIs(name: string): string | null {
   }
 }
 
+/** Well-known install locations to probe when the binary isn't on PATH yet
+ * (e.g. right after `uv tool install`, before the shell PATH is refreshed). */
+function probeWellKnown(): string | null {
+  const base = process.platform === "win32" ? "jcodemunch-mcp.exe" : "jcodemunch-mcp";
+  const candidates = [path.join(os.homedir(), ".local", "bin", base)];
+  for (const c of candidates) {
+    try {
+      if (existsSync(c)) return c;
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
+}
+
 /** Resolve the absolute path to the jcodemunch-mcp executable (cached). */
 export function resolveBinary(): string | null {
   if (cachedBin !== undefined) return cachedBin;
@@ -29,8 +48,39 @@ export function resolveBinary(): string | null {
     cachedBin = process.env.JCM_BIN;
     return cachedBin;
   }
-  cachedBin = whereIs(BIN_NAME);
+  cachedBin = whereIs(BIN_NAME) ?? probeWellKnown();
   return cachedBin;
+}
+
+/** Clear cached executable lookups — call after an install/upgrade changes PATH. */
+export function resetResolveCache(): void {
+  cachedBin = undefined;
+  execCache.clear();
+}
+
+/**
+ * Add ~/.local/bin to this process's PATH if absent. uv and its tool shims
+ * install there, but the running server won't inherit the updated PATH until
+ * restart — so after an install we splice it in ourselves. Returns true if it
+ * was added. Idempotent.
+ */
+export function ensureLocalBinOnPath(): boolean {
+  const current = process.env.PATH ?? process.env.Path ?? "";
+  const norm = (p: string) => p.replace(/[\\/]+$/, "").toLowerCase();
+  const already = current
+    .split(path.delimiter)
+    .some((p) => norm(p) === norm(localBinDir));
+  if (already) return false;
+  const next = localBinDir + path.delimiter + current;
+  process.env.PATH = next;
+  if (process.platform === "win32") process.env.Path = next;
+  return true;
+}
+
+/** Re-enable discovery of a freshly installed tool without a restart. */
+export function refreshResolution(): void {
+  ensureLocalBinOnPath();
+  resetResolveCache();
 }
 
 /** Resolve an arbitrary executable name (uv, pipx, pip, …) to a path (cached). */

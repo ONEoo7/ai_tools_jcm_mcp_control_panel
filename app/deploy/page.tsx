@@ -1,31 +1,49 @@
-import { PageHeader, Card } from "@/components/ui";
+import { PageHeader, SectionTitle } from "@/components/ui";
 import { DeployWizard } from "@/components/DeployWizard";
+import { BootstrapInstaller } from "@/components/BootstrapInstaller";
 import { doctor } from "@/lib/jcm/discovery";
+import { getBootstrapDisplay } from "@/lib/jcm/bootstrap";
 
 export const dynamic = "force-dynamic";
 
 export default async function DeployPage() {
-  const env = await doctor();
+  const [env, bootstrap] = await Promise.all([
+    doctor(),
+    Promise.resolve(getBootstrapDisplay()),
+  ]);
+
   return (
     <>
       <PageHeader
         title="Deploy"
-        description="Guided setup of jcodemunch-mcp on this machine: register MCP clients, install the CLAUDE.md policy, and add auto-reindex hooks."
+        description="Install jcodemunch-mcp on a new machine, then register MCP clients, the CLAUDE.md policy, and auto-reindex hooks."
       />
 
-      {!env.installed ? (
-        <Card className="mb-4 border-warn/30 bg-warn/5 px-5 py-4">
-          <p className="text-sm text-warn">
-            The jcodemunch-mcp CLI was not detected on PATH. Install it first
-            (e.g. <span className="font-mono">pip install jcodemunch-mcp</span>),
-            or set the <span className="font-mono">JCM_BIN</span> environment
-            variable to its full path. The wizard below drives{" "}
-            <span className="font-mono">jcodemunch-mcp init</span>, which requires
-            the CLI to be present.
-          </p>
-        </Card>
-      ) : null}
+      {/* Step 1 — get the CLI onto the machine (Python-free). Shown first when
+          it's missing; kept available (collapsed feel) once installed. */}
+      <div className="mb-6">
+        <SectionTitle className="mb-2">
+          Step 1 · Install the CLI
+        </SectionTitle>
+        <BootstrapInstaller
+          status={bootstrap.status}
+          uvPresent={bootstrap.uvPresent}
+          installUvCmd={bootstrap.installUvCmd}
+          installJcmCmd={bootstrap.installJcmCmd}
+          registerCmd={bootstrap.registerCmd}
+        />
+      </div>
 
+      <SectionTitle className="mb-2">
+        Step 2 · Configure & register
+      </SectionTitle>
+      {!env.installed ? (
+        <p className="mb-3 text-xs text-warn">
+          The jcodemunch-mcp CLI isn&apos;t detected yet — run Step 1 first. The
+          wizard below drives <span className="font-mono">jcodemunch-mcp init</span>,
+          which requires the CLI to be present.
+        </p>
+      ) : null}
       <DeployWizard />
     </>
   );
