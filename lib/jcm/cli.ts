@@ -3,32 +3,43 @@ import { spawn, spawnSync } from "node:child_process";
 /** Name of the CLI binary; overridable via env for non-standard installs. */
 export const BIN_NAME = process.env.JCM_BIN || "jcodemunch-mcp";
 
-let cachedBin: string | null | undefined;
+const DEFAULT_TIMEOUT = 120_000;
 
-/**
- * Resolve the absolute path to the jcodemunch-mcp executable.
- * On Windows, spawning without an extension is unreliable, so we resolve the
- * real `.exe` via `where`. Cached after first lookup.
- */
-export function resolveBinary(): string | null {
-  if (cachedBin !== undefined) return cachedBin;
-  // If an explicit path was given, trust it.
-  if (process.env.JCM_BIN && /[\\/]/.test(process.env.JCM_BIN)) {
-    cachedBin = process.env.JCM_BIN;
-    return cachedBin;
-  }
+let cachedBin: string | null | undefined;
+const execCache = new Map<string, string | null>();
+
+function whereIs(name: string): string | null {
   const finder = process.platform === "win32" ? "where" : "which";
   try {
-    const res = spawnSync(finder, [BIN_NAME], { encoding: "utf8" });
+    const res = spawnSync(finder, [name], { encoding: "utf8" });
     const first = (res.stdout || "")
       .split(/\r?\n/)
       .map((s) => s.trim())
       .filter(Boolean)[0];
-    cachedBin = first || null;
+    return first || null;
   } catch {
-    cachedBin = null;
+    return null;
   }
+}
+
+/** Resolve the absolute path to the jcodemunch-mcp executable (cached). */
+export function resolveBinary(): string | null {
+  if (cachedBin !== undefined) return cachedBin;
+  if (process.env.JCM_BIN && /[\\/]/.test(process.env.JCM_BIN)) {
+    cachedBin = process.env.JCM_BIN;
+    return cachedBin;
+  }
+  cachedBin = whereIs(BIN_NAME);
   return cachedBin;
+}
+
+/** Resolve an arbitrary executable name (uv, pipx, pip, …) to a path (cached). */
+export function resolveExec(name: string): string | null {
+  if (/[\\/]/.test(name)) return name;
+  if (execCache.has(name)) return execCache.get(name) ?? null;
+  const resolved = whereIs(name);
+  execCache.set(name, resolved);
+  return resolved;
 }
 
 export interface RunResult {
@@ -40,23 +51,11 @@ export interface RunResult {
   notFound?: boolean;
 }
 
-const DEFAULT_TIMEOUT = 120_000;
-
-/** Run a jcodemunch-mcp subcommand and buffer the full output. */
-export function run(
+function bufferSpawn(
+  bin: string,
   args: string[],
   opts: { cwd?: string; timeout?: number } = {},
 ): Promise<RunResult> {
-  const bin = resolveBinary();
-  if (!bin) {
-    return Promise.resolve({
-      ok: false,
-      code: null,
-      stdout: "",
-      stderr: `jcodemunch-mcp executable not found on PATH (set JCM_BIN to override).`,
-      notFound: true,
-    });
-  }
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";
@@ -78,7 +77,6 @@ export function run(
         });
       }
     }, opts.timeout ?? DEFAULT_TIMEOUT);
-
     child.stdout.on("data", (d) => (stdout += d.toString()));
     child.stderr.on("data", (d) => (stderr += d.toString()));
     child.on("error", (err) => {
@@ -96,29 +94,55 @@ export function run(
   });
 }
 
+/** Run a jcodemunch-mcp subcommand and buffer the full output. */
+export function run(
+  args: string[],
+  opts: { cwd?: string; timeout?: number } = {},
+): Promise<RunResult> {
+  const bin = resolveBinary();
+  if (!bin) {
+    return Promise.resolve({
+      ok: false,
+      code: null,
+      stdout: "",
+      stderr: `jcodemunch-mcp executable not found on PATH (set JCM_BIN to override).`,
+      notFound: true,
+    });
+  }
+  return bufferSpawn(bin, args, opts);
+}
+
+/** Run an arbitrary executable (uv, pipx, pip, …) and buffer the output. */
+export function runExec(
+  command: string,
+  args: string[],
+  opts: { cwd?: string; timeout?: number } = {},
+): Promise<RunResult> {
+  const bin = resolveExec(command);
+  if (!bin) {
+    return Promise.resolve({
+      ok: false,
+      code: null,
+      stdout: "",
+      stderr: `${command} not found on PATH.`,
+      notFound: true,
+    });
+  }
+  return bufferSpawn(bin, args, opts);
+}
+
 export interface StreamEvent {
   type: "stdout" | "stderr" | "exit" | "error" | "info";
   data: string;
   code?: number | null;
 }
 
-/**
- * Spawn a subcommand and invoke `onEvent` for each line/chunk of output.
- * Returns a promise resolving to the exit code. Used by the deploy stream.
- */
-export function stream(
+function spawnStream(
+  bin: string,
   args: string[],
   onEvent: (e: StreamEvent) => void,
   opts: { cwd?: string } = {},
 ): Promise<number | null> {
-  const bin = resolveBinary();
-  if (!bin) {
-    onEvent({
-      type: "error",
-      data: "jcodemunch-mcp executable not found on PATH (set JCM_BIN to override).",
-    });
-    return Promise.resolve(null);
-  }
   return new Promise((resolve) => {
     const child = spawn(bin, args, {
       cwd: opts.cwd,
@@ -142,4 +166,36 @@ export function stream(
       resolve(code);
     });
   });
+}
+
+/** Stream a jcodemunch-mcp subcommand, one event per output line. */
+export function stream(
+  args: string[],
+  onEvent: (e: StreamEvent) => void,
+  opts: { cwd?: string } = {},
+): Promise<number | null> {
+  const bin = resolveBinary();
+  if (!bin) {
+    onEvent({
+      type: "error",
+      data: "jcodemunch-mcp executable not found on PATH (set JCM_BIN to override).",
+    });
+    return Promise.resolve(null);
+  }
+  return spawnStream(bin, args, onEvent, opts);
+}
+
+/** Stream an arbitrary executable (uv, pipx, pip, …) resolved from PATH. */
+export function streamExec(
+  command: string,
+  args: string[],
+  onEvent: (e: StreamEvent) => void,
+  opts: { cwd?: string } = {},
+): Promise<number | null> {
+  const bin = resolveExec(command);
+  if (!bin) {
+    onEvent({ type: "error", data: `${command} not found on PATH.` });
+    return Promise.resolve(null);
+  }
+  return spawnStream(bin, args, onEvent, opts);
 }

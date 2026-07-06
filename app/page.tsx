@@ -4,23 +4,26 @@ import {
   CardHeader,
   StatCard,
   Badge,
-  Dot,
-  KeyVal,
   PageHeader,
   EmptyState,
 } from "@/components/ui";
 import { doctor } from "@/lib/jcm/discovery";
 import { getReceipt } from "@/lib/jcm/receipt";
 import { getRepos } from "@/lib/jcm/status";
+import { getLatestVersion, isUpgradeAvailable } from "@/lib/jcm/version";
+import { detectInstall } from "@/lib/jcm/install";
+import { EnvironmentCard } from "@/components/EnvironmentCard";
 import { compactNumber, usd, pct, fullNumber } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const [env, receipt, reposRes] = await Promise.all([
+  const [env, receipt, reposRes, latestRes, install] = await Promise.all([
     doctor(),
     getReceipt(30),
     getRepos(),
+    getLatestVersion(),
+    detectInstall(),
   ]);
 
   if (!env.installed) {
@@ -93,32 +96,19 @@ export default async function DashboardPage() {
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-1">
-          <CardHeader title="Environment" subtitle="Detected on this machine" />
-          <div className="px-5 py-3">
-            <KeyVal
-              k="Status"
-              v={
-                <span className="inline-flex items-center gap-1.5">
-                  <Dot tone="ok" /> Connected
-                </span>
-              }
-            />
-            <KeyVal k="Version" v={env.version} mono />
-            <KeyVal k="Binary" v={env.binaryPath ?? "—"} mono />
-            {env.files.map((f) => (
-              <KeyVal
-                key={f.path}
-                k={f.label}
-                v={
-                  <Badge tone={f.exists ? "ok" : "neutral"}>
-                    {f.exists ? "found" : "missing"}
-                  </Badge>
-                }
-              />
-            ))}
-          </div>
-        </Card>
+        <div className="lg:col-span-1">
+          <EnvironmentCard
+            version={env.version}
+            binaryPath={env.binaryPath}
+            files={env.files}
+            latest={latestRes.latest}
+            latestError={latestRes.error}
+            upgradeAvailable={isUpgradeAvailable(env.version, latestRes.latest)}
+            manager={install.manager}
+            upgradeDisplay={install.upgradeDisplay}
+            installNote={install.note}
+          />
+        </div>
 
         <Card className="lg:col-span-2">
           <CardHeader

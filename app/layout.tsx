@@ -53,7 +53,7 @@ export default async function RootLayout({
             </div>
           </aside>
           <main className="flex-1 overflow-x-hidden">
-            <div className="mx-auto max-w-6xl px-8 py-8">{children}</div>
+            <div className="w-full px-8 py-8">{children}</div>
           </main>
         </div>
       </body>
