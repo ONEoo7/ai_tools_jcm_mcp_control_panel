@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+/*
+  jCodeMunch Control Panel — dark-first control-panel theme.
+  Tokens are exposed to Tailwind via @theme inline so utilities like
+  bg-surface / text-muted / border-line resolve to these variables.
+*/
+
+:root {
+  --bg: #0b0f14;
+  --bg-elevated: #11161d;
+  --surface: #141b24;
+  --surface-2: #1a222c;
+  --line: #263140;
+  --line-soft: #1d2732;
+
+  --fg: #e6edf3;
+  --muted: #8b98a9;
+  --faint: #5c6b7d;
+
+  --accent: #4ade80; /* munch green */
+  --accent-fg: #05130a;
+  --accent-soft: #14351f;
+
+  --info: #60a5fa;
+  --warn: #fbbf24;
+  --danger: #f87171;
+
+  --radius: 0.7rem;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-info: var(--info);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  --radius-lg: var(--radius);
+}
+
+* {
+  border-color: var(--line);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thin, unobtrusive scrollbars for the log/console areas */
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 999px;
+}
+.scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+.animate-pulse-soft {
+  animation: pulse-soft 1.6s ease-in-out infinite;
+}
