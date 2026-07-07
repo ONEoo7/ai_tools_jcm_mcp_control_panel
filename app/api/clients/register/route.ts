@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { registerExtraClient } from "@/lib/jcm/clients";
+import { registerViaMcpJson, registerViaCli } from "@/lib/jcm/clients";
 
 export const dynamic = "force-dynamic";
 
-const schema = z.object({ name: z.string().min(1) });
+const schema = z.discriminatedUnion("via", [
+  z.object({ via: z.literal("mcpjson"), name: z.string().min(1) }),
+  z.object({ via: z.literal("cli"), target: z.string().min(1) }),
+]);
 
 export async function POST(req: NextRequest) {
   let body: unknown;
@@ -15,8 +18,13 @@ export async function POST(req: NextRequest) {
   }
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "name required" }, { status: 400 });
+    return NextResponse.json({ error: "via + name/target required" }, { status: 400 });
   }
-  const result = await registerExtraClient(parsed.data.name);
+
+  const result =
+    parsed.data.via === "mcpjson"
+      ? await registerViaMcpJson(parsed.data.name)
+      : await registerViaCli(parsed.data.target);
+
   return NextResponse.json(result, { status: result.ok ? 200 : 400 });
 }

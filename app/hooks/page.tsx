@@ -1,15 +1,12 @@
-import {
-  Card,
-  CardHeader,
-  Badge,
-  KeyVal,
-  PageHeader,
-  EmptyState,
-} from "@/components/ui";
+import { Card, CardHeader, Badge, KeyVal, PageHeader, EmptyState } from "@/components/ui";
 import { HooksActions } from "@/components/HooksActions";
-import { ExtraClientRows } from "@/components/ExtraClientRows";
+import { McpClientRows } from "@/components/McpClientRows";
 import { getInstallStatus } from "@/lib/jcm/status";
-import { detectExtraClients } from "@/lib/jcm/clients";
+import {
+  detectExtraClients,
+  CLI_REGISTER_TARGETS,
+  type DetectedClient,
+} from "@/lib/jcm/clients";
 
 export const dynamic = "force-dynamic";
 
@@ -33,10 +30,27 @@ export default async function HooksPage() {
 
   const hookEvents = status.hooks.claude_settings.events_with_jcm_rules;
 
-  // The CLI only reports Claude Code / Desktop; merge in panel-detected clients
-  // (VS Code Copilot, Antigravity), de-duped by name so future CLI support wins.
-  const seenClients = new Set(status.clients.map((c) => c.name.toLowerCase()));
-  const extras = extraClients.filter((c) => !seenClients.has(c.name.toLowerCase()));
+  // Merge CLI-reported clients with panel-detected ones (VS Code Copilot,
+  // Antigravity, and Claude Desktop when the CLI omits it because it has no
+  // config file yet). The CLI is authoritative for `configured`; the panel only
+  // adds a Register action. Any not-configured client the CLI can install also
+  // gets a Register button via `install <target>`.
+  const clientMap = new Map<string, DetectedClient>();
+  for (const c of status.clients) {
+    const target = CLI_REGISTER_TARGETS[c.name.toLowerCase()];
+    clientMap.set(c.name.toLowerCase(), {
+      ...c,
+      register: !c.configured && target ? { via: "cli", target } : undefined,
+    });
+  }
+  for (const c of extraClients) {
+    const key = c.name.toLowerCase();
+    const existing = clientMap.get(key);
+    // CLI status wins for `configured`; keep whichever register path we have.
+    if (existing) clientMap.set(key, { ...existing, register: existing.register ?? c.register });
+    else clientMap.set(key, c);
+  }
+  const clients = [...clientMap.values()];
 
   return (
     <>
@@ -77,18 +91,11 @@ export default async function HooksPage() {
         <Card>
           <CardHeader title="MCP clients" subtitle="Where jcodemunch is registered" />
           <div className="px-5 py-3">
-            {status.clients.map((c) => (
-              <KeyVal
-                key={c.name}
-                k={c.name}
-                v={
-                  <Badge tone={c.configured ? "ok" : "neutral"}>
-                    {c.configured ? `via ${c.method}` : "not configured"}
-                  </Badge>
-                }
-              />
-            ))}
-            <ExtraClientRows clients={extras} />
+            {clients.length ? (
+              <McpClientRows clients={clients} />
+            ) : (
+              <p className="text-xs text-muted">No MCP clients detected.</p>
+            )}
           </div>
         </Card>
 

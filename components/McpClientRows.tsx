@@ -4,40 +4,48 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge, cn } from "@/components/ui";
 
-interface ExtraClient {
+type RegisterDescriptor =
+  | { via: "cli"; target: string }
+  | { via: "mcpjson"; name: string };
+
+interface UiClient {
   name: string;
   method: string;
   config_path: string | null;
   configured: boolean;
+  register?: RegisterDescriptor;
 }
 
 /**
- * Rows for panel-detected MCP clients (VS Code Copilot, Antigravity) with a
- * one-click Register that writes the jcodemunch server entry into the editor's
- * mcp.json, then refreshes the server component to reflect the new status.
+ * MCP client rows with a one-click Register for any installed-but-unconfigured
+ * client. CLI-supported clients (Claude Desktop, Cursor, …) register via
+ * `jcodemunch-mcp install <target>`; editors the CLI can't reach (VS Code
+ * Copilot, Antigravity) get their mcp.json written directly. Refreshes the
+ * server component afterward so the status badge updates.
  */
-export function ExtraClientRows({ clients }: { clients: ExtraClient[] }) {
+export function McpClientRows({ clients }: { clients: UiClient[] }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ name: string; tone: "ok" | "err"; text: string } | null>(
     null,
   );
 
-  const register = async (name: string) => {
-    setBusy(name);
+  const register = async (c: UiClient) => {
+    if (!c.register) return;
+    setBusy(c.name);
     setMsg(null);
     try {
       const res = await fetch("/api/clients/register", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify(c.register),
       });
       const json = await res.json();
       if (!res.ok || !json.ok) {
-        setMsg({ name, tone: "err", text: json.error ?? "Registration failed." });
+        setMsg({ name: c.name, tone: "err", text: json.error ?? "Registration failed." });
       } else {
         setMsg({
-          name,
+          name: c.name,
           tone: "ok",
           text: json.backup ? "Registered · backup saved" : "Registered",
         });
@@ -45,7 +53,7 @@ export function ExtraClientRows({ clients }: { clients: ExtraClient[] }) {
       }
     } catch (e) {
       setMsg({
-        name,
+        name: c.name,
         tone: "err",
         text: e instanceof Error ? e.message : "Registration failed.",
       });
@@ -78,11 +86,10 @@ export function ExtraClientRows({ clients }: { clients: ExtraClient[] }) {
             <Badge tone={c.configured ? "ok" : "neutral"}>
               {c.configured ? `via ${c.method}` : "not configured"}
             </Badge>
-            {!c.configured ? (
+            {!c.configured && c.register ? (
               <button
-                onClick={() => register(c.name)}
+                onClick={() => register(c)}
                 disabled={busy === c.name}
-                title={c.config_path ? `Write jcodemunch server to ${c.config_path}` : undefined}
                 className="rounded-md border border-line bg-surface px-2.5 py-1 text-[11px] font-medium text-fg hover:border-accent/40 disabled:opacity-40"
               >
                 {busy === c.name ? "Registering…" : "Register"}

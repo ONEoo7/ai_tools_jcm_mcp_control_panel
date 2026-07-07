@@ -2,20 +2,30 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ClientStatus } from "./status";
-import { resolveBinary } from "./cli";
+import { resolveBinary, run } from "./cli";
 
 /**
- * MCP clients the jcodemunch-mcp CLI's `install-status` doesn't report yet
- * (it only knows Claude Code / Claude Desktop). These are detected panel-side
- * from each client's standard MCP config file so they still surface in the UI.
+ * How a not-configured client can be registered from the panel:
+ *  - "cli":     the jcodemunch-mcp CLI supports it (`install <target>`).
+ *  - "mcpjson": the CLI can't, so the panel writes the editor's mcp.json.
  */
+export type RegisterDescriptor =
+  | { via: "cli"; target: string }
+  | { via: "mcpjson"; name: string };
+
+export interface DetectedClient extends ClientStatus {
+  register?: RegisterDescriptor;
+}
+
 interface ExtraClientDef {
   name: string;
-  /** MCP config candidates, first existing wins. VS Code family: {"servers": {…}}. */
+  /** MCP config candidates, first existing wins. */
   configPaths: string[];
   /** Any of these existing means the client is installed on this machine. */
   installMarkers: string[];
+  /** Short display label for the "via …" badge. */
   method: string;
+  register: RegisterDescriptor;
 }
 
 /** Per-user application-config base for the current OS. */
@@ -30,12 +40,30 @@ function appConfigBase(): string {
   return process.env.XDG_CONFIG_HOME ?? path.join(home, ".config");
 }
 
+/**
+ * MCP clients the CLI's `install-status` may not report — either because the CLI
+ * doesn't know them (VS Code Copilot, Antigravity) or because it omits an
+ * installed-but-unconfigured client that has no config file yet (Claude Desktop
+ * on a fresh machine). Detected panel-side from app-install markers so they
+ * still surface with a Register action.
+ */
 function clientDefs(): ExtraClientDef[] {
   const base = appConfigBase();
   const home = os.homedir();
   const localApp = process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local");
 
   return [
+    {
+      name: "Claude Desktop",
+      configPaths: [path.join(base, "Claude", "claude_desktop_config.json")],
+      installMarkers: [
+        path.join(base, "Claude"),
+        path.join(localApp, "Programs", "Claude"),
+        "/Applications/Claude.app",
+      ],
+      method: "cli",
+      register: { via: "cli", target: "claude-desktop" },
+    },
     {
       name: "GitHub Copilot (VS Code)",
       configPaths: [
@@ -47,6 +75,7 @@ function clientDefs(): ExtraClientDef[] {
         path.join(base, "Code - Insiders", "User"),
       ],
       method: "mcp.json",
+      register: { via: "mcpjson", name: "GitHub Copilot (VS Code)" },
     },
     {
       name: "Antigravity (Google)",
@@ -57,6 +86,7 @@ function clientDefs(): ExtraClientDef[] {
         path.join(localApp, "Programs", "Antigravity"),
       ],
       method: "mcp.json",
+      register: { via: "mcpjson", name: "Antigravity (Google)" },
     },
   ];
 }
@@ -73,13 +103,23 @@ async function firstExisting(paths: string[]): Promise<string | null> {
   return null;
 }
 
+/** CLI client display-name → `install` target, for register buttons on clients
+ * the CLI already reports. */
+export const CLI_REGISTER_TARGETS: Record<string, string> = {
+  "claude code": "claude-code",
+  "claude desktop": "claude-desktop",
+  cursor: "cursor",
+  windsurf: "windsurf",
+  continue: "continue",
+};
+
 /**
  * Detect additional MCP clients installed on this machine and whether
- * jcodemunch is registered with each. Only returns clients that are actually
- * installed, so the list doesn't fill with editors the user doesn't have.
+ * jcodemunch is registered with each. Only returns installed clients, each
+ * carrying how it can be registered.
  */
-export async function detectExtraClients(): Promise<ClientStatus[]> {
-  const out: ClientStatus[] = [];
+export async function detectExtraClients(): Promise<DetectedClient[]> {
+  const out: DetectedClient[] = [];
   for (const def of clientDefs()) {
     const installed = await firstExisting(def.installMarkers);
     if (!installed) continue;
@@ -101,6 +141,7 @@ export async function detectExtraClients(): Promise<ClientStatus[]> {
       method: def.method,
       config_path: cfg ?? def.configPaths[0],
       configured,
+      register: def.register,
     });
   }
   return out;
@@ -113,7 +154,7 @@ export interface RegisterResult {
   error?: string;
 }
 
-/** Strip // and /* *​/ comments so JSONC config files parse with JSON.parse. */
+/** Strip // and block comments so JSONC config files parse with JSON.parse. */
 function stripJsonComments(s: string): string {
   return s
     .replace(/\/\*[\s\S]*?\*\//g, "")
@@ -126,7 +167,7 @@ function stripJsonComments(s: string): string {
  * and backs up any existing file first. Refuses to touch a file that isn't
  * valid JSON rather than clobbering hand-edited config.
  */
-export async function registerExtraClient(name: string): Promise<RegisterResult> {
+export async function registerViaMcpJson(name: string): Promise<RegisterResult> {
   const def = clientDefs().find((d) => d.name === name);
   if (!def) return { ok: false, error: "Unknown client." };
   const target = def.configPaths[0];
@@ -181,4 +222,22 @@ export async function registerExtraClient(name: string): Promise<RegisterResult>
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
   return { ok: true, path: target, backup };
+}
+
+/**
+ * Register a CLI-supported client. Uses `init --client <target> --yes --minimal`:
+ * `--minimal` writes only the MCP server registration (no CLAUDE.md/audit/hooks
+ * side effects), `--yes` runs non-interactively. A backup is created by the CLI.
+ */
+export async function registerViaCli(target: string): Promise<RegisterResult> {
+  const valid = new Set(Object.values(CLI_REGISTER_TARGETS));
+  if (!valid.has(target)) return { ok: false, error: `Unsupported target: ${target}` };
+  const res = await run(["init", "--client", target, "--yes", "--minimal"], {
+    timeout: 120_000,
+  });
+  if (res.ok) return { ok: true };
+  return {
+    ok: false,
+    error: (res.stderr || res.stdout || "registration failed").trim().slice(0, 500),
+  };
 }
