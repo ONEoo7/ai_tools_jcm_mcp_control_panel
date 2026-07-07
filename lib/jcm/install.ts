@@ -1,3 +1,5 @@
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import { resolveBinary, resolveExec, runExec } from "./cli";
 
 export type InstallMethod = "uv" | "pipx" | "pip" | "unknown";
@@ -58,13 +60,62 @@ async function detectPip(): Promise<boolean> {
   return false;
 }
 
-function planFor(method: InstallMethod): {
+/**
+ * Read the uv tool receipt for jcodemunch-mcp and report whether the install is
+ * "pinned" — tied to a specific wheel URL or an exact version specifier. uv
+ * records how a tool was requested; `uv tool upgrade` can only move a plain
+ * `{ name = "jcodemunch-mcp" }` requirement. A `url = …` or `specifier = …`
+ * entry is a fixed point, so upgrade is always a no-op and the panel must fall
+ * back to `uv tool install --force` to actually bump the version.
+ */
+async function uvInstallIsPinned(): Promise<boolean> {
+  const dirRes = await runExec("uv", ["tool", "dir"], { timeout: 15_000 });
+  if (!dirRes.ok) return false;
+  const toolsDir = stripAnsi(dirRes.stdout).trim().split(/\r?\n/)[0]?.trim();
+  if (!toolsDir) return false;
+  let text: string;
+  try {
+    text = await fs.readFile(path.join(toolsDir, JCM, "uv-receipt.toml"), "utf8");
+  } catch {
+    return false; // no readable receipt → assume plain, let `upgrade` try
+  }
+  const m = text.match(/requirements\s*=\s*\[([^\]]*)\]/);
+  if (!m) return false;
+  return /\burl\s*=/.test(m[1]) || /\bspecifier\s*=/.test(m[1]);
+}
+
+function planFor(
+  method: InstallMethod,
+  opts: { uvPinned?: boolean } = {},
+): {
   manager: string;
   upgradePlan: UpgradeStep[];
   note?: string;
 } {
   switch (method) {
     case "uv":
+      if (opts.uvPinned) {
+        return {
+          manager: "uv tool",
+          upgradePlan: [
+            {
+              label: "Reinstall latest (version-pinned install)",
+              command: "uv",
+              args: ["tool", "install", "--force", JCM],
+            },
+            {
+              label: "Refresh hooks & config",
+              command: JCM,
+              args: ["upgrade", "--no-pip", "--yes"],
+            },
+          ],
+          note:
+            "This uv install is pinned to a fixed version/URL, so `uv tool upgrade` " +
+            "is a no-op — upgrading via `uv tool install --force` instead. Close other " +
+            "Claude Code / MCP sessions first: a running jcodemunch-mcp server can lock " +
+            "these files on Windows and abort the reinstall.",
+        };
+      }
       return {
         manager: "uv tool",
         upgradePlan: [
@@ -129,7 +180,8 @@ export async function detectInstall(): Promise<InstallInfo> {
   else if (await detectPipx()) method = "pipx";
   else if (await detectPip()) method = "pip";
 
-  const { manager, upgradePlan, note } = planFor(method);
+  const uvPinned = method === "uv" ? await uvInstallIsPinned() : false;
+  const { manager, upgradePlan, note } = planFor(method, { uvPinned });
   return {
     method,
     manager,

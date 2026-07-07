@@ -2,21 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import {
   addProject,
-  listProjects,
   removeProject,
   validateProjectPath,
 } from "@/lib/jcm/registry";
-import { getRepos, matchRepo } from "@/lib/jcm/status";
+import { syncAndListProjects } from "@/lib/jcm/projects";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const [projects, reposRes] = await Promise.all([listProjects(), getRepos()]);
-  const enriched = projects.map((p) => ({
-    ...p,
-    repo: matchRepo(reposRes.repos, p.path),
-  }));
-  return NextResponse.json({ projects: enriched });
+  const projects = await syncAndListProjects();
+  return NextResponse.json({ projects });
 }
 
 const addSchema = z.object({ path: z.string().min(1) });

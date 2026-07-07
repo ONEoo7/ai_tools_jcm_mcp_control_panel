@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardHeader, Badge, EmptyState, cn } from "@/components/ui";
 import { LogConsole, useLogStream } from "@/components/LogStream";
+import { DirectoryPicker } from "@/components/DirectoryPicker";
 
 interface RepoInfo {
   file_count: number;
@@ -23,6 +24,7 @@ export function ProjectsManager() {
   const [pathInput, setPathInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const indexStream = useLogStream("/api/projects/index");
@@ -39,13 +41,15 @@ export function ProjectsManager() {
     load();
   }, []);
 
-  const add = async () => {
+  const add = async (explicitPath?: string) => {
+    const target = (explicitPath ?? pathInput).trim();
+    if (!target) return;
     setError(null);
     setBusy(true);
     const res = await fetch("/api/projects", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: pathInput }),
+      body: JSON.stringify({ path: target }),
     });
     const json = await res.json();
     setBusy(false);
@@ -96,13 +100,21 @@ export function ProjectsManager() {
             <input
               value={pathInput}
               onChange={(e) => setPathInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && pathInput && add()}
+              onKeyDown={(e) => e.key === "Enter" && pathInput.trim() && add()}
               placeholder="D:\\workspace\\my-project"
               spellCheck={false}
               className="flex-1 rounded-md border border-line bg-bg px-3 py-2 font-mono text-sm text-fg outline-none focus:border-accent/50"
             />
             <button
-              onClick={add}
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              disabled={busy}
+              className="shrink-0 rounded-md border border-line bg-surface px-4 py-2 text-sm text-fg hover:border-accent/40 disabled:opacity-40"
+            >
+              Browse…
+            </button>
+            <button
+              onClick={() => add()}
               disabled={busy || !pathInput.trim()}
               className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-fg disabled:opacity-40"
             >
@@ -131,7 +143,7 @@ export function ProjectsManager() {
           <Card key={p.id}>
             <div className="flex items-start justify-between gap-4 px-5 py-4">
               <div className="min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium text-fg">{p.label}</span>
                   {p.repo ? (
                     <Badge tone={p.repo.freshness === "fresh" ? "ok" : "warn"}>
@@ -167,6 +179,7 @@ export function ProjectsManager() {
                 </button>
                 <button
                   onClick={() => remove(p.id)}
+                  title="Stop tracking this project here. Its jcodemunch index is left untouched; it won't be re-added automatically."
                   className="rounded-md border border-line bg-surface px-3 py-1.5 text-xs text-muted hover:border-danger/40 hover:text-danger"
                 >
                   Remove
@@ -191,6 +204,17 @@ export function ProjectsManager() {
           </Card>
         ))
       )}
+
+      <DirectoryPicker
+        open={pickerOpen}
+        initialPath={pathInput.trim() || undefined}
+        onSelect={(p) => {
+          setPickerOpen(false);
+          setPathInput(p);
+          add(p);
+        }}
+        onClose={() => setPickerOpen(false)}
+      />
     </div>
   );
 }

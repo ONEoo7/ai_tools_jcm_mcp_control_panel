@@ -2,6 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Card, CardHeader, Badge, cn } from "@/components/ui";
+import { DirectoryPicker } from "@/components/DirectoryPicker";
+
+interface KnownProject {
+  id: string;
+  path: string;
+  label: string;
+}
 
 type Scope = "global" | "project";
 
@@ -25,19 +32,23 @@ export function ConfigEditor() {
     null,
   );
   const [showEffective, setShowEffective] = useState(false);
+  const [known, setKnown] = useState<KnownProject[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const dirty = raw ? draft !== raw.content : false;
 
-  const load = useCallback(async () => {
-    setMessage(null);
-    if (scope === "project" && !projectPath.trim()) {
-      setRaw(null);
-      return;
-    }
-    setLoading(true);
-    const qs = new URLSearchParams({ scope });
-    if (scope === "project") qs.set("path", projectPath.trim());
-    const res = await fetch(`/api/config?${qs.toString()}`);
+  const load = useCallback(
+    async (overridePath?: string) => {
+      setMessage(null);
+      const p = (overridePath ?? projectPath).trim();
+      if (scope === "project" && !p) {
+        setRaw(null);
+        return;
+      }
+      setLoading(true);
+      const qs = new URLSearchParams({ scope });
+      if (scope === "project") qs.set("path", p);
+      const res = await fetch(`/api/config?${qs.toString()}`);
     const json = await res.json();
     setLoading(false);
     if (!res.ok) {
@@ -53,6 +64,32 @@ export function ConfigEditor() {
   useEffect(() => {
     if (scope === "global") load();
   }, [scope, load]);
+
+  // Populate the known-projects dropdown from the tracked project registry.
+  useEffect(() => {
+    if (scope !== "project") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/projects");
+        const json = await res.json();
+        if (!cancelled) {
+          setKnown(
+            (json.projects ?? []).map((p: KnownProject) => ({
+              id: p.id,
+              path: p.path,
+              label: p.label,
+            })),
+          );
+        }
+      } catch {
+        /* leave the dropdown empty; manual path entry still works */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [scope]);
 
   const save = async () => {
     if (!raw) return;
@@ -107,24 +144,65 @@ export function ConfigEditor() {
       </div>
 
       {scope === "project" ? (
-        <div className="flex gap-2">
-          <input
-            value={projectPath}
-            onChange={(e) => setProjectPath(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && load()}
-            placeholder="Absolute project path, e.g. D:\\workspace\\my-project"
-            spellCheck={false}
-            className="flex-1 rounded-md border border-line bg-bg px-3 py-2 font-mono text-sm text-fg outline-none focus:border-accent/50"
-          />
-          <button
-            onClick={load}
-            disabled={!projectPath.trim()}
-            className="rounded-md border border-line bg-surface px-4 py-2 text-sm text-fg hover:border-accent/40 disabled:opacity-40"
-          >
-            Load
-          </button>
+        <div className="flex flex-col gap-2">
+          {known.length > 0 ? (
+            <div className="flex items-center gap-2">
+              <label className="shrink-0 text-xs text-muted">Known projects</label>
+              <select
+                value={known.some((k) => k.path === projectPath) ? projectPath : ""}
+                onChange={(e) => {
+                  const p = e.target.value;
+                  setProjectPath(p);
+                  if (p) load(p);
+                }}
+                className="flex-1 rounded-md border border-line bg-bg px-3 py-2 text-sm text-fg outline-none focus:border-accent/50"
+              >
+                <option value="">Select a project…</option>
+                {known.map((k) => (
+                  <option key={k.id} value={k.path}>
+                    {k.label} — {k.path}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
+          <div className="flex gap-2">
+            <input
+              value={projectPath}
+              onChange={(e) => setProjectPath(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && load()}
+              placeholder="Absolute project path, e.g. D:\\workspace\\my-project"
+              spellCheck={false}
+              className="flex-1 rounded-md border border-line bg-bg px-3 py-2 font-mono text-sm text-fg outline-none focus:border-accent/50"
+            />
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              className="shrink-0 rounded-md border border-line bg-surface px-4 py-2 text-sm text-fg hover:border-accent/40"
+            >
+              Browse…
+            </button>
+            <button
+              onClick={() => load()}
+              disabled={!projectPath.trim()}
+              className="rounded-md border border-line bg-surface px-4 py-2 text-sm text-fg hover:border-accent/40 disabled:opacity-40"
+            >
+              Load
+            </button>
+          </div>
         </div>
       ) : null}
+
+      <DirectoryPicker
+        open={pickerOpen}
+        initialPath={projectPath.trim() || undefined}
+        onSelect={(p) => {
+          setPickerOpen(false);
+          setProjectPath(p);
+          load(p);
+        }}
+        onClose={() => setPickerOpen(false)}
+      />
 
       {loading ? <p className="text-sm text-muted">Loading…</p> : null}
 

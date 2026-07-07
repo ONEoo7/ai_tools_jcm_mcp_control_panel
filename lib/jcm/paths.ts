@@ -47,6 +47,10 @@ export function panelDataDir(): string {
 export function registryFile(): string {
   return path.join(panelDataDir(), "registry.json");
 }
+/** Paths the user removed from tracking — kept so auto-detected repos stay removed. */
+export function ignoredFile(): string {
+  return path.join(panelDataDir(), "ignored.json");
+}
 
 /** Candidate filenames for a *project-level* jcodemunch config, most-preferred first. */
 export const projectConfigCandidates = [

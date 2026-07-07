@@ -7,12 +7,17 @@ import {
   EmptyState,
 } from "@/components/ui";
 import { HooksActions } from "@/components/HooksActions";
+import { ExtraClientRows } from "@/components/ExtraClientRows";
 import { getInstallStatus } from "@/lib/jcm/status";
+import { detectExtraClients } from "@/lib/jcm/clients";
 
 export const dynamic = "force-dynamic";
 
 export default async function HooksPage() {
-  const status = await getInstallStatus();
+  const [status, extraClients] = await Promise.all([
+    getInstallStatus(),
+    detectExtraClients(),
+  ]);
 
   if (!status.ok) {
     return (
@@ -27,6 +32,11 @@ export default async function HooksPage() {
   }
 
   const hookEvents = status.hooks.claude_settings.events_with_jcm_rules;
+
+  // The CLI only reports Claude Code / Desktop; merge in panel-detected clients
+  // (VS Code Copilot, Antigravity), de-duped by name so future CLI support wins.
+  const seenClients = new Set(status.clients.map((c) => c.name.toLowerCase()));
+  const extras = extraClients.filter((c) => !seenClients.has(c.name.toLowerCase()));
 
   return (
     <>
@@ -78,6 +88,7 @@ export default async function HooksPage() {
                 }
               />
             ))}
+            <ExtraClientRows clients={extras} />
           </div>
         </Card>
 

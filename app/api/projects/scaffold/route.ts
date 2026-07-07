@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { getProject } from "@/lib/jcm/registry";
+import { resolveProject } from "@/lib/jcm/projects";
 import { defaultProjectConfigPath } from "@/lib/jcm/paths";
 import { projectConfigTemplate } from "@/lib/jcm/templates";
 
@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: "id required" }, { status: 400 });
   }
-  const project = await getProject(parsed.data.id);
+  const project = await resolveProject(parsed.data.id);
   if (!project) return NextResponse.json({ error: "Unknown project" }, { status: 404 });
 
   const target = defaultProjectConfigPath(project.path);
