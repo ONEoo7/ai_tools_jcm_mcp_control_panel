@@ -83,9 +83,12 @@ export function ProjectsManager() {
     setNotice(res.ok ? `Wrote ${json.path}` : `Failed: ${json.error}`);
   };
 
-  const startIndex = (id: string) => {
+  const startIndex = async (id: string) => {
     setActiveIndex(id);
-    indexStream.run({ id });
+    // Wait for the index stream to finish, then refresh the list so the
+    // freshness badge and symbol/file counts update without a page reload.
+    await indexStream.run({ id });
+    load();
   };
 
   return (
