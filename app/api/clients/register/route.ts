@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { registerViaMcpJson, registerViaCli } from "@/lib/jcm/clients";
+import {
+  registerViaMcpJson,
+  registerViaCli,
+  registerClaudeDesktop,
+} from "@/lib/jcm/clients";
 
 export const dynamic = "force-dynamic";
 
 const schema = z.discriminatedUnion("via", [
   z.object({ via: z.literal("mcpjson"), name: z.string().min(1) }),
   z.object({ via: z.literal("cli"), target: z.string().min(1) }),
+  z.object({ via: z.literal("claudedesktop"), configPath: z.string().min(1) }),
 ]);
 
 export async function POST(req: NextRequest) {
@@ -21,10 +26,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "via + name/target required" }, { status: 400 });
   }
 
+  const d = parsed.data;
   const result =
-    parsed.data.via === "mcpjson"
-      ? await registerViaMcpJson(parsed.data.name)
-      : await registerViaCli(parsed.data.target);
+    d.via === "mcpjson"
+      ? await registerViaMcpJson(d.name)
+      : d.via === "cli"
+        ? await registerViaCli(d.target)
+        : await registerClaudeDesktop(d.configPath);
 
   return NextResponse.json(result, { status: result.ok ? 200 : 400 });
 }

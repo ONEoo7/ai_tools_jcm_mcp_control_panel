@@ -11,7 +11,8 @@ import { resolveBinary, run } from "./cli";
  */
 export type RegisterDescriptor =
   | { via: "cli"; target: string }
-  | { via: "mcpjson"; name: string };
+  | { via: "mcpjson"; name: string }
+  | { via: "claudedesktop"; configPath: string };
 
 export interface DetectedClient extends ClientStatus {
   register?: RegisterDescriptor;
@@ -52,18 +53,9 @@ function clientDefs(): ExtraClientDef[] {
   const home = os.homedir();
   const localApp = process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local");
 
+  // Claude Desktop is handled separately (resolveClaudeDesktop) because the
+  // Microsoft Store build virtualizes its config into a per-package folder.
   return [
-    {
-      name: "Claude Desktop",
-      configPaths: [path.join(base, "Claude", "claude_desktop_config.json")],
-      installMarkers: [
-        path.join(base, "Claude"),
-        path.join(localApp, "Programs", "Claude"),
-        "/Applications/Claude.app",
-      ],
-      method: "cli",
-      register: { via: "cli", target: "claude-desktop" },
-    },
     {
       name: "GitHub Copilot (VS Code)",
       configPaths: [
@@ -103,6 +95,73 @@ async function firstExisting(paths: string[]): Promise<string | null> {
   return null;
 }
 
+async function readdirSafe(p: string): Promise<string[]> {
+  try {
+    return await fs.readdir(p);
+  } catch {
+    return [];
+  }
+}
+
+export interface ClaudeDesktopInfo {
+  installed: boolean;
+  /** Where the app actually reads/writes claude_desktop_config.json. */
+  configPath: string;
+  /** true = Microsoft Store (MSIX) build with a virtualized config dir. */
+  isStore: boolean;
+}
+
+/**
+ * Resolve Claude Desktop, handling the Microsoft Store (MSIX) build whose
+ * %APPDATA% is virtualized to
+ *   %LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\claude_desktop_config.json
+ * The jcodemunch CLI targets the non-Store %APPDATA%\Roaming\Claude path, which
+ * a Store install never reads — so we detect and write the right file directly.
+ */
+export async function resolveClaudeDesktop(): Promise<ClaudeDesktopInfo> {
+  const base = appConfigBase();
+  const home = os.homedir();
+  const local = process.env.LOCALAPPDATA ?? path.join(home, "AppData", "Local");
+
+  if (process.platform === "win32") {
+    const pkgs = await readdirSafe(path.join(local, "Packages"));
+    const claudePkg = pkgs.find((p) => /^Claude_/i.test(p));
+    if (claudePkg) {
+      return {
+        installed: true,
+        isStore: true,
+        configPath: path.join(
+          local,
+          "Packages",
+          claudePkg,
+          "LocalCache",
+          "Roaming",
+          "Claude",
+          "claude_desktop_config.json",
+        ),
+      };
+    }
+  }
+
+  // Classic (non-Store) install.
+  const classicConfig =
+    process.platform === "darwin"
+      ? path.join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json")
+      : path.join(base, "Claude", "claude_desktop_config.json");
+  const appMarkers =
+    process.platform === "win32"
+      ? [
+          path.join(local, "Claude", "Claude.exe"),
+          path.join(local, "AnthropicClaude", "Claude.exe"),
+          path.join(local, "Programs", "Claude", "Claude.exe"),
+        ]
+      : ["/Applications/Claude.app"];
+  const installed =
+    (await firstExisting([classicConfig])) !== null ||
+    (await firstExisting(appMarkers)) !== null;
+  return { installed, isStore: false, configPath: classicConfig };
+}
+
 /** CLI client display-name → `install` target, for register buttons on clients
  * the CLI already reports. */
 export const CLI_REGISTER_TARGETS: Record<string, string> = {
@@ -120,6 +179,26 @@ export const CLI_REGISTER_TARGETS: Record<string, string> = {
  */
 export async function detectExtraClients(): Promise<DetectedClient[]> {
   const out: DetectedClient[] = [];
+
+  // Claude Desktop (Store or classic) — resolved to the config the app actually
+  // reads, and registered by writing that file directly.
+  const cd = await resolveClaudeDesktop();
+  if (cd.installed) {
+    let configured = false;
+    try {
+      configured = /jcodemunch/i.test(await fs.readFile(cd.configPath, "utf8"));
+    } catch {
+      /* config not created yet — not configured */
+    }
+    out.push({
+      name: "Claude Desktop",
+      method: cd.isStore ? "store config" : "config",
+      config_path: cd.configPath,
+      configured,
+      register: { via: "claudedesktop", configPath: cd.configPath },
+    });
+  }
+
   for (const def of clientDefs()) {
     const installed = await firstExisting(def.installMarkers);
     if (!installed) continue;
@@ -222,6 +301,67 @@ export async function registerViaMcpJson(name: string): Promise<RegisterResult> 
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
   return { ok: true, path: target, backup };
+}
+
+/**
+ * Register jcodemunch in Claude Desktop's own config (the `{"mcpServers": {…}}`
+ * schema). Writes the exact file the app reads — including the Microsoft Store
+ * build's virtualized path — additively, backing up any existing config first.
+ * The user must restart Claude Desktop for it to take effect.
+ */
+export async function registerClaudeDesktop(configPath: string): Promise<RegisterResult> {
+  const bin = resolveBinary();
+  const serverEntry = bin
+    ? { command: bin, args: ["serve"] }
+    : { command: "uvx", args: ["jcodemunch-mcp"] };
+
+  let root: Record<string, unknown> = {};
+  let existed = false;
+  try {
+    const text = await fs.readFile(configPath, "utf8");
+    existed = true;
+    if (text.trim()) {
+      try {
+        root = JSON.parse(stripJsonComments(text));
+      } catch {
+        return {
+          ok: false,
+          error: `${path.basename(configPath)} isn't valid JSON — edit it manually so registration doesn't overwrite it.`,
+        };
+      }
+    }
+  } catch {
+    /* file doesn't exist yet — we'll create it */
+  }
+
+  if (typeof root !== "object" || root === null || Array.isArray(root)) root = {};
+  const servers =
+    typeof root.mcpServers === "object" &&
+    root.mcpServers !== null &&
+    !Array.isArray(root.mcpServers)
+      ? (root.mcpServers as Record<string, unknown>)
+      : {};
+  servers["jcodemunch"] = serverEntry;
+  root.mcpServers = servers;
+
+  let backup: string | undefined;
+  if (existed) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    backup = `${configPath}.bak-${stamp}`;
+    try {
+      await fs.copyFile(configPath, backup);
+    } catch {
+      backup = undefined;
+    }
+  }
+
+  try {
+    await fs.mkdir(path.dirname(configPath), { recursive: true });
+    await fs.writeFile(configPath, JSON.stringify(root, null, 2) + "\n", "utf8");
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+  return { ok: true, path: configPath, backup };
 }
 
 /**

@@ -26,6 +26,51 @@ export default async function DashboardPage() {
     detectInstall(),
   ]);
 
+  if (env.status === "broken") {
+    return (
+      <>
+        <PageHeader
+          title="Dashboard"
+          description="Deploy, configure, and observe jcodemunch-mcp on this machine."
+        />
+        <div className="rounded-lg border border-warn/30 bg-warn/5 px-6 py-6">
+          <h2 className="text-sm font-semibold text-warn">
+            jcodemunch-mcp is installed but not working
+          </h2>
+          <p className="mt-2 text-xs text-muted">
+            The binary is present at{" "}
+            <code className="select-all font-mono text-faint">{env.binaryPath}</code>{" "}
+            but fails to run:
+          </p>
+          <pre className="scroll-thin mt-2 max-h-24 overflow-auto rounded border border-line bg-bg px-3 py-2 font-mono text-[11px] text-danger">
+            {env.detail}
+          </pre>
+          <p className="mt-3 text-xs text-muted">
+            This usually means a <span className="text-fg">uv tool upgrade was
+            interrupted while jcodemunch&apos;s MCP server was running</span> (its
+            files were locked, so the reinstall couldn&apos;t finish). To repair,
+            run the reinstall while jcodemunch is <span className="text-fg">not</span>{" "}
+            running:
+          </p>
+          <ol className="mt-2 list-decimal space-y-1 pl-5 text-xs text-muted">
+            <li>Fully quit Claude Desktop (and any MCP client using jcodemunch).</li>
+            <li>
+              In a terminal, run:{" "}
+              <code className="select-all rounded bg-surface-2 px-1.5 py-0.5 font-mono text-accent">
+                uv tool install jcodemunch-mcp --force
+              </code>
+            </li>
+            <li>Reopen Claude Desktop, then reload this page.</li>
+          </ol>
+          <p className="mt-3 text-[11px] text-faint">
+            Tip: avoid upgrading from the panel while this session is connected to
+            jcodemunch — the running server locks its own files on Windows.
+          </p>
+        </div>
+      </>
+    );
+  }
+
   if (!env.installed) {
     return (
       <>
