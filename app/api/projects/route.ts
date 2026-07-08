@@ -6,12 +6,16 @@ import {
   validateProjectPath,
 } from "@/lib/jcm/registry";
 import { syncAndListProjects } from "@/lib/jcm/projects";
+import { getCurrentIndexVersion } from "@/lib/jcm/indexVersion";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const projects = await syncAndListProjects();
-  return NextResponse.json({ projects });
+  const [projects, currentIndexVersion] = await Promise.all([
+    syncAndListProjects(),
+    getCurrentIndexVersion(),
+  ]);
+  return NextResponse.json({ projects, currentIndexVersion });
 }
 
 const addSchema = z.object({ path: z.string().min(1) });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, CardHeader, Badge, EmptyState, cn } from "@/components/ui";
 import { LogConsole, useLogStream } from "@/components/LogStream";
 import { DirectoryPicker } from "@/components/DirectoryPicker";
@@ -16,6 +16,26 @@ interface Project {
   path: string;
   label: string;
   repo: RepoInfo | null;
+  indexVersion: number | null;
+  indexOutdated: boolean;
+}
+interface ProjectFileRow {
+  group: string;
+  label: string;
+  path: string;
+  present: boolean;
+  kind: string;
+}
+
+/** Group rows by their `group`, preserving first-seen order. */
+function groupByOrder(rows: ProjectFileRow[]): [string, ProjectFileRow[]][] {
+  const map = new Map<string, ProjectFileRow[]>();
+  for (const r of rows) {
+    const arr = map.get(r.group) ?? [];
+    arr.push(r);
+    map.set(r.group, arr);
+  }
+  return [...map.entries()];
 }
 
 export function ProjectsManager() {
@@ -25,16 +45,69 @@ export function ProjectsManager() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [indexOnAdd, setIndexOnAdd] = useState(true);
   const [activeIndex, setActiveIndex] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [filesByProject, setFilesByProject] = useState<
+    Record<string, ProjectFileRow[] | "loading">
+  >({});
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [currentIndexVersion, setCurrentIndexVersion] = useState<number | null>(null);
+  // Projects we've already auto-re-indexed this session (guards against loops).
+  const autoReindexed = useRef<Set<string>>(new Set());
   const indexStream = useLogStream("/api/projects/index");
+
+  const loadFiles = async (list: Project[]) => {
+    setFilesByProject((prev) => {
+      const next = { ...prev };
+      for (const p of list) next[p.id] = "loading";
+      return next;
+    });
+    await Promise.all(
+      list.map(async (p) => {
+        try {
+          const res = await fetch(
+            `/api/projects/files?path=${encodeURIComponent(p.path)}`,
+          );
+          const json = await res.json();
+          setFilesByProject((prev) => ({ ...prev, [p.id]: json.files ?? [] }));
+        } catch {
+          setFilesByProject((prev) => ({ ...prev, [p.id]: [] }));
+        }
+      }),
+    );
+  };
 
   const load = async () => {
     setLoading(true);
     const res = await fetch("/api/projects");
     const json = await res.json();
-    setProjects(json.projects ?? []);
+    const list: Project[] = json.projects ?? [];
+    setProjects(list);
+    setCurrentIndexVersion(json.currentIndexVersion ?? null);
     setLoading(false);
+    // The index schema was bumped by a jcodemunch update — re-index affected
+    // projects automatically (each at most once per session).
+    const stale = list.filter(
+      (p) => p.indexOutdated && !autoReindexed.current.has(p.id),
+    );
+    if (stale.length) autoReindex(stale);
+  };
+
+  const autoReindex = async (list: Project[]) => {
+    for (const p of list) autoReindexed.current.add(p.id);
+    for (const p of list) {
+      setActiveIndex(p.id);
+      await indexStream.run({ id: p.id });
+    }
+    load();
+  };
+
+  // Lazy-load a project's files the first time its section is expanded.
+  const toggleFiles = (p: Project) => {
+    const willOpen = !expanded[p.id];
+    if (willOpen && filesByProject[p.id] === undefined) loadFiles([p]);
+    setExpanded((prev) => ({ ...prev, [p.id]: willOpen }));
   };
 
   useEffect(() => {
@@ -58,7 +131,11 @@ export function ProjectsManager() {
       return;
     }
     setPathInput("");
-    load();
+    await load();
+    // Kick off indexing right away when enabled (incremental if already indexed).
+    if (indexOnAdd && json.project?.id) {
+      startIndex(json.project.id);
+    }
   };
 
   const remove = async (id: string) => {
@@ -81,6 +158,11 @@ export function ProjectsManager() {
       return;
     }
     setNotice(res.ok ? `Wrote ${json.path}` : `Failed: ${json.error}`);
+    const proj = projects.find((p) => p.id === id);
+    if (res.ok && proj) {
+      loadFiles([proj]);
+      setExpanded((e) => ({ ...e, [proj.id]: true }));
+    }
   };
 
   const startIndex = async (id: string) => {
@@ -124,6 +206,15 @@ export function ProjectsManager() {
               {busy ? "Adding…" : "Add"}
             </button>
           </div>
+          <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted">
+            <input
+              type="checkbox"
+              checked={indexOnAdd}
+              onChange={(e) => setIndexOnAdd(e.target.checked)}
+              className="accent-[var(--accent)]"
+            />
+            Index on add (build the jcodemunch index right after adding)
+          </label>
           {error ? <p className="text-xs text-danger">{error}</p> : null}
         </div>
       </Card>
@@ -131,6 +222,18 @@ export function ProjectsManager() {
       {notice ? (
         <div className="rounded-md border border-line bg-surface px-4 py-2 text-xs text-muted">
           {notice}
+        </div>
+      ) : null}
+
+      {projects.some((p) => p.indexOutdated) ? (
+        <div className="rounded-md border border-warn/30 bg-warn/5 px-4 py-3 text-xs text-warn">
+          <span className="font-semibold">Index schema updated</span> — jcodemunch
+          now builds{" "}
+          <span className="font-mono">v{currentIndexVersion}</span> indexes.{" "}
+          {projects.filter((p) => p.indexOutdated).length} project
+          {projects.filter((p) => p.indexOutdated).length === 1 ? "" : "s"} on an
+          older schema {indexStream.status === "running" ? "are being" : "will be"}{" "}
+          re-indexed automatically so new analysis features work.
         </div>
       ) : null}
 
@@ -155,6 +258,13 @@ export function ProjectsManager() {
                   ) : (
                     <Badge tone="neutral">not indexed</Badge>
                   )}
+                  {p.repo && p.indexOutdated ? (
+                    <Badge tone="warn">
+                      index v{p.indexVersion} → v{currentIndexVersion}
+                    </Badge>
+                  ) : p.repo && p.indexVersion != null ? (
+                    <Badge tone="neutral">index v{p.indexVersion}</Badge>
+                  ) : null}
                 </div>
                 <div className="mt-0.5 truncate font-mono text-xs text-faint">
                   {p.path}
@@ -189,6 +299,60 @@ export function ProjectsManager() {
                 </button>
               </div>
             </div>
+
+            <div className="border-t border-line-soft px-5 py-2">
+              <button
+                onClick={() => toggleFiles(p)}
+                className="flex w-full items-center gap-2 py-1 text-left text-[11px] font-semibold uppercase tracking-wider text-faint hover:text-muted"
+              >
+                <span className="inline-block w-3 text-accent">
+                  {expanded[p.id] ? "▾" : "▸"}
+                </span>
+                Config &amp; integration files
+              </button>
+              {expanded[p.id] ? (
+                <div className="pb-1">
+                  {filesByProject[p.id] === "loading" ||
+                  filesByProject[p.id] === undefined ? (
+                    <p className="py-1 text-xs text-muted">Loading files…</p>
+                  ) : (filesByProject[p.id] as ProjectFileRow[]).length === 0 ? (
+                    <p className="py-1 text-xs text-faint">
+                      No project files detected.
+                    </p>
+                  ) : (
+                    groupByOrder(filesByProject[p.id] as ProjectFileRow[]).map(
+                      ([group, rows]) => (
+                        <div key={group} className="mt-3 first:mt-1">
+                          <div className="mb-1 text-[13px] font-semibold text-fg">
+                            {group}
+                          </div>
+                          {rows.map((f, i) => (
+                            <div
+                              key={f.label + i}
+                              className="flex items-start justify-between gap-3 border-t border-line-soft py-1.5 first:border-t-0"
+                            >
+                              <div className="flex min-w-0 flex-col gap-0.5">
+                                <span className="text-xs text-muted">{f.label}</span>
+                                <code
+                                  className="select-all break-all font-mono text-[10.5px] leading-snug text-faint"
+                                  title="Click to select, then copy"
+                                >
+                                  {f.path}
+                                </code>
+                              </div>
+                              <Badge tone={f.present ? "ok" : "neutral"}>
+                                {f.present ? "present" : "absent"}
+                              </Badge>
+                            </div>
+                          ))}
+                        </div>
+                      ),
+                    )
+                  )}
+                </div>
+              ) : null}
+            </div>
+
             {activeIndex === p.id ? (
               <div
                 className={cn(

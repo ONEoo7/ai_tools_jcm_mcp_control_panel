@@ -1,11 +1,6 @@
 import { promises as fs } from "node:fs";
 import { run, resolveBinary } from "./cli";
-import {
-  globalConfigFile,
-  claudeSettingsFile,
-  claudeGlobalMd,
-  codeIndexDir,
-} from "./paths";
+import { globalConfigFile, codeIndexDir } from "./paths";
 
 export interface DoctorFile {
   label: string;
@@ -79,8 +74,6 @@ export async function doctor(): Promise<Doctor> {
     [
       { label: "Global config", path: globalConfigFile },
       { label: "Config dir", path: codeIndexDir },
-      { label: "Claude settings", path: claudeSettingsFile },
-      { label: "Global CLAUDE.md", path: claudeGlobalMd },
     ].map(async (f) => ({ ...f, exists: await exists(f.path) })),
   );
 

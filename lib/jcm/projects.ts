@@ -8,6 +8,7 @@ import {
   type Project,
 } from "./registry";
 import { getRepos, matchRepo, type RepoInfo } from "./status";
+import { getCurrentIndexVersion, readRepoIndexVersion } from "./indexVersion";
 
 export interface EnrichedProject {
   id: string;
@@ -15,6 +16,10 @@ export interface EnrichedProject {
   label: string;
   /** Non-null when jcodemunch has this path indexed; null means tracked but not indexed. */
   repo: RepoInfo | null;
+  /** Index schema version this repo was built with (null if not indexed/unreadable). */
+  indexVersion: number | null;
+  /** True when indexVersion is below the CLI's current INDEX_VERSION → needs re-index. */
+  indexOutdated: boolean;
 }
 
 const norm = (s: string) =>
@@ -44,12 +49,14 @@ export async function syncAndListProjects(): Promise<EnrichedProject[]> {
   if (toAdopt.length) await adoptProjects(toAdopt);
 
   const finalProjects = toAdopt.length ? await listProjects() : registered;
-  return finalProjects.map((p) => ({
-    id: p.id,
-    path: p.path,
-    label: p.label,
-    repo: matchRepo(repos, p.path),
-  }));
+  const current = await getCurrentIndexVersion();
+  return finalProjects.map((p) => {
+    const repo = matchRepo(repos, p.path);
+    const indexVersion = repo ? readRepoIndexVersion(repo.repo_id) : null;
+    const indexOutdated =
+      current != null && indexVersion != null && indexVersion < current;
+    return { id: p.id, path: p.path, label: p.label, repo, indexVersion, indexOutdated };
+  });
 }
 
 /**
