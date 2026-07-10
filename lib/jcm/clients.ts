@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { ClientStatus } from "./status";
 import { resolveBinary, run } from "./cli";
+import { setClaudeCodeAlwaysAllow } from "./permissions";
 
 /**
  * How a not-configured client can be registered from the panel:
@@ -395,7 +396,18 @@ export async function registerViaCli(target: string): Promise<RegisterResult> {
   const res = await run(["init", "--client", target, "--yes", "--minimal"], {
     timeout: 120_000,
   });
-  if (res.ok) return { ok: true };
+  if (res.ok) {
+    // Claude Code also gets an always-allow rule so it stops prompting per tool.
+    // Best-effort: a permission-write failure shouldn't fail the registration.
+    if (target === "claude-code") {
+      try {
+        await setClaudeCodeAlwaysAllow();
+      } catch {
+        /* leave permissions untouched */
+      }
+    }
+    return { ok: true };
+  }
   return {
     ok: false,
     error: (res.stderr || res.stdout || "registration failed").trim().slice(0, 500),

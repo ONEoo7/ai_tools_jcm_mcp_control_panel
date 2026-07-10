@@ -8,13 +8,15 @@ import {
   type DetectedClient,
 } from "@/lib/jcm/clients";
 import { buildClientFileGroups } from "@/lib/jcm/clientFiles";
+import { getEnforcementMode } from "@/lib/jcm/enforcement";
 
 export const dynamic = "force-dynamic";
 
 export default async function HooksPage() {
-  const [status, extraClients] = await Promise.all([
+  const [status, extraClients, enforcement] = await Promise.all([
     getInstallStatus(),
     detectExtraClients(),
+    getEnforcementMode(),
   ]);
 
   if (!status.ok) {
@@ -60,7 +62,7 @@ export default async function HooksPage() {
       />
 
       {groups.length ? (
-        <ClientFiles groups={groups} />
+        <ClientFiles groups={groups} enforcement={enforcement} />
       ) : (
         <EmptyState title="No MCP clients detected" />
       )}
