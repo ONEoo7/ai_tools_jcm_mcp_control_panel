@@ -31,18 +31,27 @@ export function ClientFiles({
   const [allowBusy, setAllowBusy] = useState<string | null>(null);
 
   const alwaysAllow = async (group: ClientGroup) => {
+    const isAnti = group.name.toLowerCase().includes("antigravity");
+    const label = isAnti ? "Antigravity" : "Claude Code";
     setAllowBusy(group.name);
     setMsg(null);
     try {
-      const res = await fetch("/api/clients/allow", { method: "POST" });
+      const res = await fetch("/api/clients/allow", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ client: isAnti ? "antigravity" : "claude-code" }),
+      });
       const r = await res.json();
       if (r.ok) {
+        const restart = isAnti
+          ? "restart Antigravity to apply (ideally apply while it's closed, or it may overwrite the file on exit)."
+          : "restart Claude Code to apply.";
         setMsg({
           name: group.name,
           tone: "ok",
           text: r.alreadySet
-            ? "Already set to always-allow in Claude Code."
-            : "jcodemunch set to always-allow in Claude Code — restart Claude Code to apply.",
+            ? `All jcodemunch tools already allowed in ${label}.`
+            : `All jcodemunch tools allowed in ${label} — ${restart}`,
         });
       } else {
         setMsg({ name: group.name, tone: "err", text: r.error ?? "Could not set always-allow." });
@@ -52,6 +61,40 @@ export function ClientFiles({
         name: group.name,
         tone: "err",
         text: e instanceof Error ? e.message : "Could not set always-allow.",
+      });
+    } finally {
+      setAllowBusy(null);
+    }
+  };
+
+  // VS Code Copilot has no jcodemunch-scoped grant — only the global,
+  // all-tools chat.tools.autoApprove switch.
+  const copilotAutoApprove = async (group: ClientGroup) => {
+    setAllowBusy(group.name);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/clients/allow", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ client: "copilot" }),
+      });
+      const r = await res.json();
+      if (r.ok) {
+        setMsg({
+          name: group.name,
+          tone: "ok",
+          text: r.alreadySet
+            ? "chat.tools.autoApprove is already enabled in VS Code."
+            : "Enabled chat.tools.autoApprove in VS Code — reload VS Code to apply. Note: this approves ALL Copilot tools, not just jcodemunch.",
+        });
+      } else {
+        setMsg({ name: group.name, tone: "err", text: r.error ?? "Could not update VS Code settings." });
+      }
+    } catch (e) {
+      setMsg({
+        name: group.name,
+        tone: "err",
+        text: e instanceof Error ? e.message : "Could not update VS Code settings.",
       });
     } finally {
       setAllowBusy(null);
@@ -164,14 +207,30 @@ export function ClientFiles({
           {testingName === group.name ? "Testing…" : "Test"}
         </button>
       ) : null}
-      {group.name.toLowerCase() === "claude code" ? (
+      {group.configured &&
+      (group.name.toLowerCase() === "claude code" ||
+        group.name.toLowerCase().includes("antigravity")) ? (
         <button
           onClick={() => alwaysAllow(group)}
           disabled={allowBusy === group.name}
-          title="Add mcp__jcodemunch to Claude Code's permissions.allow so it never prompts for jcodemunch tools"
+          title={
+            group.name.toLowerCase().includes("antigravity")
+              ? "Allow all jcodemunch tools in Antigravity — writes mcp(jcodemunch/*) to ~/.gemini/config/config.json"
+              : "Add mcp__jcodemunch to Claude Code's permissions.allow so it never prompts for jcodemunch tools"
+          }
           className={btn}
         >
           {allowBusy === group.name ? "Setting…" : "Always allow"}
+        </button>
+      ) : null}
+      {group.configured && group.name.toLowerCase().includes("copilot") ? (
+        <button
+          onClick={() => copilotAutoApprove(group)}
+          disabled={allowBusy === group.name}
+          title="Set chat.tools.autoApprove:true in VS Code settings.json — auto-approves ALL Copilot tools (not just jcodemunch)"
+          className={btn}
+        >
+          {allowBusy === group.name ? "Setting…" : "Auto-approve tools"}
         </button>
       ) : null}
       {!group.configured && group.register ? (
