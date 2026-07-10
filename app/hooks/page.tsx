@@ -56,7 +56,7 @@ export default async function HooksPage() {
     <>
       <PageHeader
         title="Hooks & Integration"
-        description="Global, machine-level integration per MCP client — MCP registration, user CLAUDE.md, reindex hooks, and the global skill. Per-project files (project CLAUDE.md, AGENTS.md, rules, .jcodemunch.jsonc) live under each project in Projects."
+        description="Global, machine-level integration per MCP client — MCP registration, user CLAUDE.md, reindex hooks, and the global skill. Test launches a client's configured jcodemunch server and runs the real MCP handshake to confirm it responds. Per-project files (project CLAUDE.md, AGENTS.md, rules, .jcodemunch.jsonc) live under each project in Projects."
       />
 
       {groups.length ? (

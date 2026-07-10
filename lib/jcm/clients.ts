@@ -26,6 +26,13 @@ interface ExtraClientDef {
   installMarkers: string[];
   /** Short display label for the "via …" badge. */
   method: string;
+  /**
+   * The JSON object that holds server entries in this client's config schema:
+   *  - "servers"    → VS Code family: { "servers": { name: {type,command,args} } }
+   *  - "mcpServers" → Codeium/Gemini/Windsurf family (Antigravity): { "mcpServers": { name: {command,args} } }
+   * Defaults to "servers".
+   */
+  mcpKey?: "servers" | "mcpServers";
   register: RegisterDescriptor;
 }
 
@@ -70,14 +77,21 @@ function clientDefs(): ExtraClientDef[] {
       register: { via: "mcpjson", name: "GitHub Copilot (VS Code)" },
     },
     {
+      // Antigravity is Codeium/Gemini-derived: it reads mcp_config.json with an
+      // `mcpServers` key under ~/.gemini (NOT the VS Code User/mcp.json + `servers`).
+      // Antigravity 2.0 unified config wins; the older per-app path is a fallback.
       name: "Antigravity (Google)",
-      configPaths: [path.join(base, "Antigravity", "User", "mcp.json")],
+      configPaths: [
+        path.join(home, ".gemini", "config", "mcp_config.json"),
+        path.join(home, ".gemini", "antigravity", "mcp_config.json"),
+      ],
       installMarkers: [
+        path.join(home, ".gemini", "antigravity"),
         path.join(base, "Antigravity", "User"),
-        path.join(home, ".antigravity"),
         path.join(localApp, "Programs", "Antigravity"),
       ],
-      method: "mcp.json",
+      method: "mcp_config.json",
+      mcpKey: "mcpServers",
       register: { via: "mcpjson", name: "Antigravity (Google)" },
     },
   ];
@@ -249,12 +263,17 @@ function stripJsonComments(s: string): string {
 export async function registerViaMcpJson(name: string): Promise<RegisterResult> {
   const def = clientDefs().find((d) => d.name === name);
   if (!def) return { ok: false, error: "Unknown client." };
-  const target = def.configPaths[0];
+  // Write to the config file the client already has; else the preferred candidate.
+  const target = (await firstExisting(def.configPaths)) ?? def.configPaths[0];
+  const key = def.mcpKey ?? "servers";
 
   const bin = resolveBinary();
-  const serverEntry = bin
-    ? { type: "stdio", command: bin, args: ["serve"] }
-    : { type: "stdio", command: "uvx", args: ["jcodemunch-mcp"] };
+  const cmd = bin
+    ? { command: bin, args: ["serve"] }
+    : { command: "uvx", args: ["jcodemunch-mcp"] };
+  // VS Code's `servers` schema tags entries with type:"stdio"; the Codeium/Gemini
+  // `mcpServers` schema takes bare command/args.
+  const serverEntry = key === "servers" ? { type: "stdio", ...cmd } : cmd;
 
   let root: Record<string, unknown> = {};
   let existed = false;
@@ -276,12 +295,13 @@ export async function registerViaMcpJson(name: string): Promise<RegisterResult> 
   }
 
   if (typeof root !== "object" || root === null || Array.isArray(root)) root = {};
+  const existing = root[key];
   const servers =
-    typeof root.servers === "object" && root.servers !== null && !Array.isArray(root.servers)
-      ? (root.servers as Record<string, unknown>)
+    typeof existing === "object" && existing !== null && !Array.isArray(existing)
+      ? (existing as Record<string, unknown>)
       : {};
   servers["jcodemunch"] = serverEntry;
-  root.servers = servers;
+  root[key] = servers;
 
   let backup: string | undefined;
   if (existed) {

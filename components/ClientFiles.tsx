@@ -5,12 +5,70 @@ import { useRouter } from "next/navigation";
 import { Card, CardHeader, Badge, cn } from "@/components/ui";
 import type { ClientGroup } from "@/lib/jcm/clientFiles";
 
+interface TestState {
+  name: string;
+  tone: "ok" | "err" | "info";
+  text: string;
+  detail?: string;
+}
+
 export function ClientFiles({ groups }: { groups: ClientGroup[] }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ name: string; tone: "ok" | "err"; text: string } | null>(
     null,
   );
+  const [testingName, setTestingName] = useState<string | null>(null);
+  const [test, setTest] = useState<TestState | null>(null);
+
+  const runTest = async (group: ClientGroup) => {
+    setTestingName(group.name);
+    setTest({ name: group.name, tone: "info", text: "Launching the configured server and running the MCP handshake…" });
+    try {
+      const res = await fetch("/api/clients/test", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ configPath: group.configPath }),
+      });
+      const r = await res.json();
+      if (r.ok) {
+        // serverInfo.version is the MCP *SDK* version, not jcodemunch's release
+        // (jcodemunch registers its server without a version, so the SDK fills in
+        // its own) — label it as such so it isn't mistaken for the tool version.
+        const meta = [
+          r.protocolVersion ? `MCP ${r.protocolVersion}` : null,
+          r.serverVersion ? `SDK v${r.serverVersion}` : null,
+        ].filter(Boolean);
+        const detail = [
+          r.command ? `${r.source ?? "command"}: ${r.command}` : null,
+          ...meta,
+          r.durationMs ? `${r.durationMs}ms` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        const warn = r.jcodemunchDetected ? "" : " ⚠ tools don't look like jcodemunch";
+        setTest({
+          name: group.name,
+          tone: r.jcodemunchDetected ? "ok" : "err",
+          text: `Connected — ${r.serverName ?? "MCP server"} · ${r.toolCount ?? 0} tools exposed.${warn}`,
+          detail: detail || undefined,
+        });
+      } else {
+        const detail = r.command
+          ? `${r.source ?? "command"}: ${r.command}${r.durationMs ? ` · ${r.durationMs}ms` : ""}`
+          : undefined;
+        setTest({ name: group.name, tone: "err", text: r.error ?? "Test failed.", detail });
+      }
+    } catch (e) {
+      setTest({
+        name: group.name,
+        tone: "err",
+        text: e instanceof Error ? e.message : "Test failed.",
+      });
+    } finally {
+      setTestingName(null);
+    }
+  };
 
   const register = async (group: ClientGroup) => {
     if (!group.register) return;
@@ -63,6 +121,16 @@ export function ClientFiles({ groups }: { groups: ClientGroup[] }) {
                   <Badge tone={group.configured ? "ok" : "neutral"}>
                     {group.configured ? `via ${group.method}` : "not configured"}
                   </Badge>
+                  {group.configured ? (
+                    <button
+                      onClick={() => runTest(group)}
+                      disabled={testingName === group.name}
+                      title="Launch this client's configured jcodemunch server and run the MCP handshake"
+                      className="rounded-md border border-line bg-surface px-2.5 py-1 text-[11px] font-medium text-fg hover:border-accent/40 disabled:opacity-40"
+                    >
+                      {testingName === group.name ? "Testing…" : "Test"}
+                    </button>
+                  ) : null}
                   {!group.configured && group.register ? (
                     <button
                       onClick={() => register(group)}
@@ -84,6 +152,27 @@ export function ClientFiles({ groups }: { groups: ClientGroup[] }) {
               )}
             >
               {msg.text}
+            </div>
+          ) : null}
+          {test?.name === group.name ? (
+            <div className="flex flex-col gap-0.5 border-b border-line-soft px-5 py-1.5">
+              <span
+                className={cn(
+                  "text-[11px]",
+                  test.tone === "ok"
+                    ? "text-accent"
+                    : test.tone === "err"
+                      ? "text-danger"
+                      : "text-faint",
+                )}
+              >
+                {test.text}
+              </span>
+              {test.detail ? (
+                <code className="select-all break-all font-mono text-[10px] leading-snug text-faint">
+                  {test.detail}
+                </code>
+              ) : null}
             </div>
           ) : null}
           <div className="px-5 py-2">

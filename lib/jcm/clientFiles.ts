@@ -17,6 +17,8 @@ export interface ClientGroup {
   name: string;
   method: string;
   configured: boolean;
+  /** The client's MCP config file, so a Test can read its exact server command. */
+  configPath: string | null;
   register?: RegisterDescriptor;
   files: ClientFileRow[];
   /** true for the trailing AGENTS.md pseudo-group (no register / configured badge). */
@@ -39,6 +41,7 @@ export function buildClientFileGroups(
     name: c.name,
     method: c.method,
     configured: c.configured,
+    configPath: c.config_path,
     register: c.register,
     files: filesForClient(c, status),
   }));
@@ -82,7 +85,7 @@ function filesForClient(c: DetectedClient, status: InstallStatus): ClientFileRow
   } else if (key === "cursor" || key === "windsurf") {
     files.push(mcpRegistration());
   } else if (key.includes("antigravity")) {
-    files.push({ label: "MCP config (mcp.json)", path: c.config_path, present: c.configured, kind: "config" });
+    files.push({ label: "MCP config (mcp_config.json)", path: c.config_path, present: c.configured, kind: "config" });
   } else {
     files.push(mcpRegistration());
   }

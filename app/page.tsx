@@ -1,27 +1,21 @@
 import Link from "next/link";
-import {
-  Card,
-  CardHeader,
-  StatCard,
-  Badge,
-  PageHeader,
-  EmptyState,
-} from "@/components/ui";
+import { StatCard, PageHeader, EmptyState } from "@/components/ui";
 import { doctor } from "@/lib/jcm/discovery";
-import { getReceipt } from "@/lib/jcm/receipt";
 import { getRepos } from "@/lib/jcm/status";
+import { getTelemetry } from "@/lib/jcm/telemetry";
 import { getLatestVersion, isUpgradeAvailable } from "@/lib/jcm/version";
 import { detectInstall } from "@/lib/jcm/install";
 import { EnvironmentCard } from "@/components/EnvironmentCard";
-import { compactNumber, usd, pct, fullNumber } from "@/lib/format";
+import { RepoUsageCard } from "@/components/RepoUsageCard";
+import { compactNumber, pct, fullNumber } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const [env, receipt, reposRes, latestRes, install] = await Promise.all([
+  const [env, reposRes, telemetry, latestRes, install] = await Promise.all([
     doctor(),
-    getReceipt(30),
     getRepos(),
+    getTelemetry(30),
     getLatestVersion(),
     detectInstall(),
   ]);
@@ -114,16 +108,15 @@ export default async function DashboardPage() {
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard
-          label="Tokens saved · 30d"
-          value={compactNumber(receipt.totals.savings_tokens)}
-          hint={`${pct(receipt.reductionPct)} reduction`}
+          label="Tool calls · 30d"
+          value={fullNumber(telemetry.totals.calls)}
+          hint={telemetry.enabled ? "all clients" : "enable telemetry to record"}
           accent
         />
         <StatCard
-          label="Cost avoided · 30d"
-          value={usd(receipt.savings_usd)}
-          hint={`at ${receipt.model} rates`}
-          accent
+          label="Retrieval events · 30d"
+          value={fullNumber(telemetry.totals.rankingEvents)}
+          hint="search / plan queries"
         />
         <StatCard
           label="Indexed repos"
@@ -131,11 +124,23 @@ export default async function DashboardPage() {
           hint={`${compactNumber(totalSymbols)} symbols`}
         />
         <StatCard
-          label="Tool calls · 30d"
-          value={fullNumber(receipt.totals.calls)}
-          hint="via jcodemunch"
+          label="Errored calls · 30d"
+          value={fullNumber(telemetry.totals.errors)}
+          hint={
+            telemetry.totals.calls > 0
+              ? `${pct(telemetry.totals.errors / telemetry.totals.calls)} of calls`
+              : "—"
+          }
         />
       </div>
+
+      <p className="mt-2 text-[11px] text-faint">
+        All figures come from client-agnostic telemetry (~/.code-index/telemetry.db) — every MCP
+        client, not just Claude.
+        {telemetry.enabled
+          ? " Restart a client after enabling for it to start recording."
+          : " Telemetry is off; enable it on the repositories card to start recording."}
+      </p>
 
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="lg:col-span-1">
@@ -152,53 +157,11 @@ export default async function DashboardPage() {
           />
         </div>
 
-        <Card className="lg:col-span-2">
-          <CardHeader
-            title="Indexed repositories"
-            subtitle={`${repos.length} indexed`}
-            action={
-              <Link href="/projects" className="text-xs text-accent hover:underline">
-                Manage projects →
-              </Link>
-            }
-          />
-          {repos.length === 0 ? (
-            <div className="px-5 py-8">
-              <EmptyState
-                title="No repositories indexed yet"
-                description="Add a project and index it to start saving tokens."
-              />
-            </div>
-          ) : (
-            <div className="divide-y divide-line-soft">
-              {repos.slice(0, 6).map((r) => (
-                <div
-                  key={r.repo_id}
-                  className="flex items-center justify-between gap-4 px-5 py-3"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate text-sm text-fg">{r.display_name}</div>
-                    <div className="truncate text-xs text-faint">{r.source_root}</div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-3">
-                    <span className="text-xs text-muted">
-                      {compactNumber(r.symbol_count)} sym · {r.file_count} files
-                    </span>
-                    <Badge tone={r.freshness === "fresh" ? "ok" : "warn"}>
-                      {r.freshness}
-                    </Badge>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
+        <RepoUsageCard repos={repos} telemetry={telemetry} />
       </div>
 
-      {receipt.error ? (
-        <p className="mt-4 text-xs text-warn">
-          Savings data unavailable: {receipt.error}
-        </p>
+      {telemetry.error ? (
+        <p className="mt-4 text-xs text-warn">Telemetry unavailable: {telemetry.error}</p>
       ) : null}
     </>
   );
